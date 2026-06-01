@@ -6,10 +6,10 @@ import { NextResponse } from "next/server";
 import { blob } from "stream/consumers";
 
 export async function POST(request: Request):Promise<NextResponse> {
-    const body = (await request.json()) as HandleUploadBody;
     
     try{
-       const jsonResponse = await handleUpload({
+        const body = (await request.json()) as HandleUploadBody;
+        const jsonResponse = await handleUpload({
          token: process.env.BLOB_READ_WRITE_TOKEN!,
          body,
          request,
@@ -30,7 +30,7 @@ export async function POST(request: Request):Promise<NextResponse> {
              tokenPayload: JSON.stringify({ userId }),
            };
          },
-         onUploadComplete: async ({ blob, tokenPayload }) => {
+         onUploadCompleted: async ({ blob, tokenPayload }) => {
            console.log("Upload complete:", blob.url);
            const payload = tokenPayload ? JSON.parse(tokenPayload) : null;
            const userId = payload?.userId;
