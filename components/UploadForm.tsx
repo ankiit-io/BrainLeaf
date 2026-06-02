@@ -139,10 +139,12 @@ const UploadForm = () => {
         contentType: "application/pdf",
       });
 
-      let coverUrl: string;
+      let coverUrl = "";
+      let coverBlobKey = "";
 
       if (data.coverImage) {
         const coverFile = data.coverImage;
+
         const uploadedCoverBlob = await upload(
           `${fileTitle}-cover`,
           coverFile,
@@ -154,6 +156,7 @@ const UploadForm = () => {
         );
 
         coverUrl = uploadedCoverBlob.url;
+        coverBlobKey = uploadedCoverBlob.pathname;
       } else {
         const response = await fetch(parsedPDF.cover);
         const blob = await response.blob();
@@ -165,7 +168,9 @@ const UploadForm = () => {
         });
 
         coverUrl = uploadedCoverBlob.url;
+        coverBlobKey = uploadedCoverBlob.pathname;
       }
+
 
       const book = await createBook({
         clerkId: userId,
@@ -175,11 +180,14 @@ const UploadForm = () => {
         fileURL: uploadedPDFBlob.url,
         fileBlobKey: uploadedPDFBlob.pathname,
         coverURL: coverUrl,
+        coverBlobKey,
         fileSize: pdfFile.size,
       });
 
+      console.log("BOOK RESPONSE:", book);
+
       if (!book.success) {
-        throw new Error("Book creation failed");
+        throw new Error(book.error || "Book creation failed");
       }
 
       if (book.alreadyExists) {
@@ -203,13 +211,13 @@ const UploadForm = () => {
 
       form.reset();
       router.push("/");
-    } catch (error) {
-      console.error("Error during book upload:", error);
+    } catch (error: any) {
+      console.error("========== UPLOAD ERROR ==========");
+      console.error(error);
+
       toast.error(
-        "An error occurred while uploading your book. Please try again.",
+        error?.message || "An error occurred while uploading your book.",
       );
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
