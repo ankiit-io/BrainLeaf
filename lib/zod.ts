@@ -15,9 +15,12 @@ export const UploadSchema = z.object({
       message: "PDF must be 50MB or less.",
     }),
   coverImage: z
-    .custom<File | null>((file) => file === null || file instanceof File, {
-      message: "Cover image must be a file.",
-    })
+    .custom<File | null | undefined>(
+      (file) => file == null || file instanceof File,
+      {
+        message: "Cover image must be a file.",
+      },
+    )
     .refine((file) => !file || file.type.startsWith("image/"), {
       message: "Only image files are allowed.",
     })

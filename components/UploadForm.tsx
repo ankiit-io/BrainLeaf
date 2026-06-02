@@ -18,9 +18,13 @@ import {
 import { UploadSchema } from "@/lib/zod";
 import { cn, parsePDFFile } from "@/lib/utils";
 import { useAuth } from "@clerk/nextjs";
-import {toast} from "sonner";
+import { toast } from "sonner";
 import { useRouter } from "next/navigation";
-import { checkBookExists, createBook, saveBookSegments } from "@/lib/actions/book.actions";
+import {
+  checkBookExists,
+  createBook,
+  saveBookSegments,
+} from "@/lib/actions/book.actions";
 import { upload } from "@vercel/blob/client";
 const voiceGroups = {
   male: [
@@ -94,7 +98,7 @@ const UploadForm = () => {
       author: "",
       persona: "",
       pdfFile: undefined,
-      coverImage: undefined,
+      coverImage: null,
     },
   });
 
@@ -137,27 +141,31 @@ const UploadForm = () => {
 
       let coverUrl: string;
 
-     if (data.coverImage) {
-       const coverFile = data.coverImage;
-       const uploadedCoverBlob = await upload(`${fileTitle}-cover`, coverFile, {
-         access: "public",
-         handleUploadUrl: "/api/upload",
-         contentType: coverFile.type,
-       });
+      if (data.coverImage) {
+        const coverFile = data.coverImage;
+        const uploadedCoverBlob = await upload(
+          `${fileTitle}-cover`,
+          coverFile,
+          {
+            access: "public",
+            handleUploadUrl: "/api/upload",
+            contentType: coverFile.type,
+          },
+        );
 
-       coverUrl = uploadedCoverBlob.url;
-     } else {
-       const response = await fetch(parsedPDF.cover);
-       const blob = await response.blob();
+        coverUrl = uploadedCoverBlob.url;
+      } else {
+        const response = await fetch(parsedPDF.cover);
+        const blob = await response.blob();
 
-       const uploadedCoverBlob = await upload(`${fileTitle}-cover`, blob, {
-         access: "public",
-         handleUploadUrl: "/api/upload",
-         contentType: "image/png",
-       });
+        const uploadedCoverBlob = await upload(`${fileTitle}-cover`, blob, {
+          access: "public",
+          handleUploadUrl: "/api/upload",
+          contentType: "image/png",
+        });
 
-       coverUrl = uploadedCoverBlob.url;
-     }
+        coverUrl = uploadedCoverBlob.url;
+      }
 
       const book = await createBook({
         clerkId: userId,
