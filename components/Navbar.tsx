@@ -3,9 +3,10 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { SignInButton, UserButton, useUser,useClerk } from "@clerk/nextjs";
+import { SignInButton, UserButton, useUser } from "@clerk/nextjs";
 
 import { cn } from "@/lib/utils";
+import { useUserPlan } from "@/lib/subscription.client";
 
 const navItems = [
   { label: "Library", href: "/" },
@@ -15,7 +16,17 @@ const navItems = [
 const Navbar = () => {
   const pathname = usePathname();
   const { isLoaded, isSignedIn } = useUser();
-  const {user} = useUser();
+  const { user } = useUser();
+  const { plan } = useUserPlan();
+
+  const showSubscriptionsLink = isLoaded && isSignedIn;
+  const isSubscriptionsActive = pathname.startsWith("/subscriptions");
+  const subscriptionLabel =
+    plan === "pro"
+      ? "Subscriptions"
+      : plan === "standard"
+        ? "Upgrade to Pro"
+        : "UPGRADE";
   return (
     <header className="w-full fixed z-50 bg-[var(--bg-primary)]">
       <div className="wrapper navbar-height py-4 flex justify-between items-center">
@@ -47,6 +58,20 @@ const Navbar = () => {
               </Link>
             );
           })}
+
+          {showSubscriptionsLink ? (
+            <Link
+              href="/subscriptions"
+              className={cn(
+                "nav-link-base",
+                isSubscriptionsActive
+                  ? "nav-link-active"
+                  : "text-black hover:opacity-70",
+              )}
+            >
+              {subscriptionLabel}
+            </Link>
+          ) : null}
 
           <div className="flex gap-7.5 items-center">
             {!isLoaded ? (

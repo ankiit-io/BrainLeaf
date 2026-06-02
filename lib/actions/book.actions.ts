@@ -1,28 +1,41 @@
 "use server";
 
-import { connectToDatabase } from "@/database/mongoose";
 import { CreateBook, TextSegment } from "@/types";
-import { generateSlug, serializeData } from "../utils";
+import { connectToDatabase } from "@/database/mongoose";
+import { escapeRegex, generateSlug, serializeData } from "@/lib/utils";
 import Book from "@/database/models/book.model";
 import BookSegment from "@/database/models/book-segment.model";
-import {revalidatePath} from "next/cache";
+import mongoose from "mongoose";
+import { auth } from "@clerk/nextjs/server";
+import { revalidatePath } from "next/cache";
+import { getUserPlan } from "@/lib/subscription.server";
+import { PLAN_LIMITS } from "@/lib/subscriptions-constants";
 
-export const getAllBooks = async () => {
+export const getAllBooks = async (search?: string) => {
   try {
     await connectToDatabase();
 
-    const books = await Book.find().sort({ createdAt: -1 }).lean();
+    let query = {};
+
+    if (search) {
+      const escapedSearch = escapeRegex(search);
+      const regex = new RegExp(escapedSearch, "i");
+      query = {
+        $or: [{ title: { $regex: regex } }, { author: { $regex: regex } }],
+      };
+    }
+
+    const books = await Book.find(query).sort({ createdAt: -1 }).lean();
 
     return {
       success: true,
       data: serializeData(books),
     };
-  } catch (error: any) {
-    console.error("Error fetching all books:", error);
-
+  } catch (e) {
+    console.error("Error connecting to database", e);
     return {
       success: false,
-      error: error instanceof Error ? error.message : "Failed to fetch books",
+      error: e,
     };
   }
 };
@@ -45,15 +58,11 @@ export const checkBookExists = async (title: string) => {
     return {
       exists: false,
     };
-  } catch (error: any) {
-    console.error("Error checking book existence:", error);
-
+  } catch (e) {
+    console.error("Error checking book exists", e);
     return {
       exists: false,
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to check book existence",
+      error: e,
     };
   }
 };
@@ -74,31 +83,67 @@ export const createBook = async (data: CreateBook) => {
       };
     }
 
+    const { userId } = await auth();
+
+    if (!userId || userId !== data.clerkId) {
+      return { success: false, error: "Unauthorized" };
+    }
+
+    const plan = await getUserPlan();
+    const limits = PLAN_LIMITS[plan];
+
+    const bookCount = await Book.countDocuments({ clerkId: userId });
+
+    if (bookCount >= limits.maxBooks) {
+      revalidatePath("/");
+
+      return {
+        success: false,
+        error: `You have reached the maximum number of books allowed for your ${plan} plan (${limits.maxBooks}). Please upgrade to add more books.`,
+        isBillingError: true,
+      };
+    }
+
     const book = await Book.create({
       ...data,
+      clerkId: userId,
       slug,
       totalSegments: 0,
     });
-
-    revalidatePath("/");
 
     return {
       success: true,
       data: serializeData(book),
     };
-  } catch (error: any) {
-    console.error("========== CREATE BOOK ERROR ==========");
-    console.error(error);
-
-    if (error?.errors) {
-      Object.keys(error.errors).forEach((key) => {
-        console.error(`${key}:`, error.errors[key]?.message);
-      });
-    }
+  } catch (e) {
+    console.error("Error creating a book", e);
 
     return {
       success: false,
-      error: error instanceof Error ? error.message : "Failed to create book",
+      error: e,
+    };
+  }
+};
+
+export const getBookBySlug = async (slug: string) => {
+  try {
+    await connectToDatabase();
+
+    const book = await Book.findOne({ slug }).lean();
+
+    if (!book) {
+      return { success: false, error: "Book not found" };
+    }
+
+    return {
+      success: true,
+      data: serializeData(book),
+    };
+  } catch (e) {
+    console.error("Error fetching book by slug", e);
+    return {
+      success: false,
+      error: e,
     };
   }
 };
@@ -126,118 +171,80 @@ export const saveBookSegments = async (
 
     await BookSegment.insertMany(segmentsToInsert);
 
-    await Book.findByIdAndUpdate(bookId, {
-      totalSegments: segments.length,
-    });
+    await Book.findByIdAndUpdate(bookId, { totalSegments: segments.length });
 
-    console.log("Book segments saved successfully");
+    console.log("Book segments saved successfully.");
 
     return {
       success: true,
-      data: {
-        segmentsCreated: segments.length,
-      },
+      data: { segmentsCreated: segments.length },
     };
-  } catch (error: any) {
-    console.error("Error saving book segments:", error);
-
-    try {
-      await BookSegment.deleteMany({ bookId });
-      await Book.findByIdAndDelete(bookId);
-
-      console.log(
-        "Deleted book and segments due to failure while saving segments.",
-      );
-    } catch (cleanupError) {
-      console.error("Cleanup failed:", cleanupError);
-    }
+  } catch (e) {
+    console.error("Error saving book segments", e);
 
     return {
       success: false,
-      error:
-        error instanceof Error ? error.message : "Failed to save book segments",
+      error: e,
     };
   }
 };
 
-export const getBookBySlug = async (slug: string) => {
-  try {
-    await connectToDatabase();
-
-    const book = await Book.findOne({ slug }).lean();
-
-    if (!book) {
-      return {
-        success: false,
-        data: null,
-      };
-    }
-
-    return {
-      success: true,
-      data: serializeData(book),
-    };
-  } catch (error: any) {
-    console.error("Error fetching book by slug:", error);
-
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : "Failed to fetch book",
-    };
-  }
-};
-
+// Searches book segments using MongoDB text search with regex fallback
 export const searchBookSegments = async (
   bookId: string,
   query: string,
-  segmentLimit: number,
+  limit: number = 5,
 ) => {
   try {
     await connectToDatabase();
 
-    const trimmedQuery = query.trim();
+    console.log(`Searching for: "${query}" in book ${bookId}`);
 
-    if (!trimmedQuery) {
-      return {
-        success: true,
-        data: [],
-      };
+    const bookObjectId = new mongoose.Types.ObjectId(bookId);
+
+    // Try MongoDB text search first (requires text index)
+    let segments: Record<string, unknown>[] = [];
+    try {
+      segments = await BookSegment.find({
+        bookId: bookObjectId,
+        $text: { $search: query },
+      })
+        .select("_id bookId content segmentIndex pageNumber wordCount")
+        .sort({ score: { $meta: "textScore" } })
+        .limit(limit)
+        .lean();
+    } catch {
+      // Text index may not exist — fall through to regex fallback
+      segments = [];
     }
 
-    const segments = await BookSegment.find(
-      {
-        bookId,
-        $text: {
-          $search: trimmedQuery,
-        },
-      },
-      {
-        score: {
-          $meta: "textScore",
-        },
-      },
-    )
-      .sort({
-        score: {
-          $meta: "textScore",
-        },
+    // Fallback: regex search matching ANY keyword
+    if (segments.length === 0) {
+      const keywords = query.split(/\s+/).filter((k) => k.length > 2);
+      const pattern = keywords.map(escapeRegex).join("|");
+
+      segments = await BookSegment.find({
+        bookId: bookObjectId,
+        content: { $regex: pattern, $options: "i" },
       })
-      .limit(segmentLimit)
-      .lean();
+        .select("_id bookId content segmentIndex pageNumber wordCount")
+        .sort({ segmentIndex: 1 })
+        .limit(limit)
+        .lean();
+    }
+
+    console.log(`Search complete. Found ${segments.length} results`);
 
     return {
       success: true,
       data: serializeData(segments),
     };
-  } catch (error: any) {
-    console.error("Error searching book segments:", error);
-
+  } catch (error) {
+    console.error("Error searching segments:", error);
     return {
       success: false,
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to search book segments",
+      error: (error as Error).message,
+      data: [],
     };
   }
 };

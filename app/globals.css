@@ -846,6 +846,18 @@
   flex: 1 !important;
 }
 
+/* Align pricing card content and actions consistently */
+.cl-pricingTableCardContent,
+[class*="pricingTableCardContent"] {
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.cl-pricingTableCardFooter,
+[class*="pricingTableCardFooter"] {
+  margin-top: auto !important;
+}
+
 /* Clerk Auth Input Fields with Soft Shadow */
 .cl-formFieldInput__identifier,
 .cl-formFieldInput__password,
@@ -976,6 +988,7 @@ button[data-variant="unstyled"] *,
 .clerk-pricing-table-wrapper button {
   height: 3rem !important;
   min-height: 3rem !important;
+  width: 100% !important;
   font-size: 1.125rem !important;
   background-color: #212a3b !important;
   color: white !important;

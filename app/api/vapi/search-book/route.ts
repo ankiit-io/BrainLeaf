@@ -2,169 +2,110 @@ import { NextResponse } from "next/server";
 
 import { searchBookSegments } from "@/lib/actions/book.actions";
 
-type ToolCallPayload = {
-  id?: string;
-  name?: string;
-  toolName?: string;
-  parameters?: Record<string, unknown>;
-  args?: Record<string, unknown>;
-  arguments?: Record<string, unknown> | string;
-  function?: {
-    name?: string;
-    arguments?: Record<string, unknown> | string;
-  };
-};
-
-type NormalizedToolCall = {
-  id?: string;
-  name: string | null;
-  parameters: Record<string, unknown>;
-};
-
-const SEARCH_TOOL_NAME = "search book";
-const NO_INFORMATION_FOUND = "no information found about this topic";
-
-const getToolCalls = (body: Record<string, unknown>) => {
-  const candidates = [
-    body.toolCalls,
-    body.tool_calls,
-    body.message && (body.message as Record<string, unknown>).toolCalls,
-    body.message && (body.message as Record<string, unknown>).tool_calls,
-    body.toolCall,
-    body.tool_call,
-    body.calls,
-  ];
-
-  for (const candidate of candidates) {
-    if (Array.isArray(candidate)) {
-      return candidate as ToolCallPayload[];
-    }
+// Helper function to process book search logic
+async function processBookSearch(bookId: unknown, query: unknown) {
+  // Validate inputs before conversion to prevent null/undefined becoming "null"/"undefined" strings
+  if (bookId == null || query == null || query === "") {
+    return { result: "Missing bookId or query" };
   }
 
-  return [] as ToolCallPayload[];
-};
+  // Convert bookId to string
+  const bookIdStr = String(bookId);
+  const queryStr = String(query).trim();
 
-const parseArguments = (
-  args: ToolCallPayload["arguments"] | ToolCallPayload["function"],
-): Record<string, unknown> => {
-  if (!args) {
-    return {};
+  // Additional validation after conversion
+  if (
+    !bookIdStr ||
+    bookIdStr === "null" ||
+    bookIdStr === "undefined" ||
+    !queryStr
+  ) {
+    return { result: "Missing bookId or query" };
   }
 
-  const rawArgs =
-    typeof args === "object" && "arguments" in args ? args.arguments : args;
+  // Execute search
+  const searchResult = await searchBookSegments(bookIdStr, queryStr, 3);
 
-  if (!rawArgs) {
-    return {};
+  // Return results
+  if (!searchResult.success || !searchResult.data?.length) {
+    return { result: "No information found about this topic in the book." };
   }
 
-  if (typeof rawArgs === "string") {
+  const combinedText = searchResult.data
+    .map((segment) => (segment as { content: string }).content)
+    .join("\n\n");
+
+  return { result: combinedText };
+}
+
+export async function GET() {
+  return NextResponse.json({ status: "ok" });
+}
+
+// Parse tool arguments that may arrive as a JSON string or an object
+function parseArgs(args: unknown): Record<string, unknown> {
+  if (!args) return {};
+  if (typeof args === "string") {
     try {
-      return JSON.parse(rawArgs) as Record<string, unknown>;
+      return JSON.parse(args);
     } catch {
       return {};
     }
   }
-
-  if (typeof rawArgs === "object") {
-    return rawArgs as Record<string, unknown>;
-  }
-
-  return {};
-};
-
-const normalizeToolCall = (call: ToolCallPayload): NormalizedToolCall => {
-  const name =
-    call.name ||
-    call.toolName ||
-    call.function?.name ||
-    (typeof call.function === "string" ? call.function : null);
-
-  const parameters =
-    (call.parameters && typeof call.parameters === "object"
-      ? call.parameters
-      : null) ||
-    (call.args && typeof call.args === "object" ? call.args : null) ||
-    parseArguments(call.function ?? call.arguments);
-
-  return {
-    id: call.id,
-    name: typeof name === "string" ? name : null,
-    parameters,
-  };
-};
-
-const getParam = (params: Record<string, unknown>, keys: string[]) => {
-  for (const key of keys) {
-    const value = params[key];
-    if (typeof value === "string" && value.trim().length > 0) {
-      return value.trim();
-    }
-  }
-
-  return null;
-};
+  return args as Record<string, unknown>;
+}
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as Record<string, unknown>;
-    const toolCalls = getToolCalls(body);
-    const normalizedCalls = toolCalls.map(normalizeToolCall);
-    const searchCalls = normalizedCalls.filter(
-      (call) => call.name === SEARCH_TOOL_NAME,
-    );
+    const body = await request.json();
 
-    if (searchCalls.length === 0) {
-      return NextResponse.json({ results: [] });
+    console.log("Vapi search-book request:", JSON.stringify(body, null, 2));
+
+    // Support multiple Vapi formats
+    const functionCall = body?.message?.functionCall;
+    const toolCallList =
+      body?.message?.toolCallList || body?.message?.toolCalls;
+
+    // Handle single functionCall format
+    if (functionCall) {
+      const { name, parameters } = functionCall;
+      const parsed = parseArgs(parameters);
+
+      if (name === "searchBook") {
+        const result = await processBookSearch(parsed.bookId, parsed.query);
+        return NextResponse.json(result);
+      }
+
+      return NextResponse.json({ result: `Unknown function: ${name}` });
     }
 
-    const results = await Promise.all(
-      searchCalls.map(async (call) => {
-        const bookId = getParam(call.parameters, [
-          "bookId",
-          "book_id",
-          "bookID",
-          "book",
-          "id",
-        ]);
-        const query = getParam(call.parameters, [
-          "query",
-          "q",
-          "search",
-          "text",
-        ]);
+    // Handle toolCallList format (array of calls)
+    if (!toolCallList || toolCallList.length === 0) {
+      return NextResponse.json({
+        results: [{ result: "No tool calls found" }],
+      });
+    }
 
-        if (!bookId || !query) {
-          return {
-            toolCallId: call.id,
-            result: NO_INFORMATION_FOUND,
-          };
-        }
+    const results = [];
 
-        const searchResult = await searchBookSegments(bookId, query, 3);
-        const segments = searchResult.success ? (searchResult.data ?? []) : [];
-        const combinedText = Array.isArray(segments)
-          ? segments
-              .map((segment) =>
-                typeof segment?.content === "string" ? segment.content : "",
-              )
-              .filter((content) => content.trim().length > 0)
-              .join("\n\n")
-          : "";
+    for (const toolCall of toolCallList) {
+      const { id, function: func } = toolCall;
+      const name = func?.name;
+      const args = parseArgs(func?.arguments);
 
-        return {
-          toolCallId: call.id,
-          result: combinedText.length > 0 ? combinedText : NO_INFORMATION_FOUND,
-        };
-      }),
-    );
+      if (name === "searchBook") {
+        const searchResult = await processBookSearch(args.bookId, args.query);
+        results.push({ toolCallId: id, ...searchResult });
+      } else {
+        results.push({ toolCallId: id, result: `Unknown function: ${name}` });
+      }
+    }
 
     return NextResponse.json({ results });
   } catch (error) {
-    console.error("Error handling VAPI search-book tool call:", error);
-    return NextResponse.json(
-      { error: "Failed to handle tool call." },
-      { status: 500 },
-    );
+    console.error("Vapi search-book error:", error);
+    return NextResponse.json({
+      results: [{ result: "Error processing request" }],
+    });
   }
 }

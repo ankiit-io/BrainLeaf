@@ -171,7 +171,6 @@ const UploadForm = () => {
         coverBlobKey = uploadedCoverBlob.pathname;
       }
 
-
       const book = await createBook({
         clerkId: userId,
         title: data.title,
@@ -187,7 +186,21 @@ const UploadForm = () => {
       console.log("BOOK RESPONSE:", book);
 
       if (!book.success) {
-        throw new Error(book.error || "Book creation failed");
+        if (book.isBillingError) {
+          toast.error(book.error || "Upgrade your plan to add more books.", {
+            action: {
+              label: "Upgrade",
+              onClick: () => router.push("/subscriptions"),
+            },
+          });
+          setTimeout(() => {
+            router.push("/subscriptions");
+          }, 800);
+          return;
+        }
+
+        toast.error(book.error || "Book creation failed");
+        return;
       }
 
       if (book.alreadyExists) {
@@ -218,6 +231,8 @@ const UploadForm = () => {
       toast.error(
         error?.message || "An error occurred while uploading your book.",
       );
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
