@@ -112,3 +112,35 @@ export const getBookBySlug = async (slug: string) => {
     return { success: false, error: error };
   }
 };
+
+export const searchBookSegments = async (
+  bookId: string,
+  query: string,
+  segmentLimit: number,
+) => {
+  try {
+    await connectToDatabase();
+
+    const trimmedQuery = query.trim();
+
+    if (!trimmedQuery) {
+      return { success: true, data: [] };
+    }
+
+    const segments = await BookSegment.find(
+      {
+        bookId,
+        $text: { $search: trimmedQuery },
+      },
+      { score: { $meta: "textScore" } },
+    )
+      .sort({ score: { $meta: "textScore" } })
+      .limit(segmentLimit)
+      .lean();
+
+    return { success: true, data: serializeData(segments) };
+  } catch (error) {
+    console.error("Error searching book segments:", error);
+    return { success: false, error: error };
+  }
+};

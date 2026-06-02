@@ -1,10 +1,10 @@
-import Image from "next/image";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
-import { ArrowLeft, Mic, MicOff } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 
 import { getBookBySlug } from "@/lib/actions/book.actions";
+import VapiControls from "@/components/VapiControls";
 
 const Page = async ({ params }: { params: Promise<{ slug: string }> }) => {
   const { userId } = await auth();
@@ -20,7 +20,7 @@ const Page = async ({ params }: { params: Promise<{ slug: string }> }) => {
     redirect("/");
   }
 
-  const { title, author, coverURL, persona } = bookResult.data;
+  const book = bookResult.data;
 
   return (
     <main className="book-page-container">
@@ -28,7 +28,7 @@ const Page = async ({ params }: { params: Promise<{ slug: string }> }) => {
         <ArrowLeft className="text-[var(--text-primary)]" size={20} />
       </Link>
       <section className="vapi-main-container">
-        <div className="vapi-header-card vapi-card-layout w-full">
+        {/* <div className="vapi-header-card vapi-card-layout w-full">
           <div className="vapi-cover-wrapper">
             <Image
               src={coverURL}
@@ -72,9 +72,9 @@ const Page = async ({ params }: { params: Promise<{ slug: string }> }) => {
               </div>
             </div>
           </div>
-        </div>
+        </div> */}
 
-        <div className="vapi-transcript-wrapper w-full mt-6">
+        {/* <div className="vapi-transcript-wrapper w-full mt-6">
           <div className="transcript-container">
             <div className="transcript-empty">
               <Mic className="text-[var(--text-primary)]" size={48} />
@@ -84,7 +84,8 @@ const Page = async ({ params }: { params: Promise<{ slug: string }> }) => {
               </p>
             </div>
           </div>
-        </div>
+        </div> */}
+        <VapiControls book={book} />
       </section>
     </main>
   );
